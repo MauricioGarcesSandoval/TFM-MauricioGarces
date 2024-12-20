@@ -4,42 +4,60 @@ from datetime import datetime
 from pyspark.sql.window import Window
 import argparse
 import numpy as np
+import logging
+import os
+import json
 
-if __name__ == '__main__':
-    # Crear sesion de Spark
-    spark = SparkSession \
-        .builder \
-        .appName("Calculo de MTBF ") \
-        .getOrCreate()
+def setup_logging():
+    # Obtener la fecha actual en formato yyyyMMdd para guardar el log
+    fecha_actual = datetime.now().strftime("%Y%m%d")
 
-    # Iniciamos el parser
-    parser = argparse.ArgumentParser(description="Script PySpark con argumentos de entrada.")
+    # Crear el directorio basado en la fecha
+    log_dir = "./logs"
+    os.makedirs(log_dir, exist_ok=True)  # Crear directorios si no existen
 
-    # Anadimos los argumentos
-    parser.add_argument("--path-log", required=True, help="configuration spark: path to read")
-    parser.add_argument("--date", required=True, help="configuration spark: date, format yyyyMM")
-    parser.add_argument("--percentil", required=True,
-                        help="configuration spark: percentil, 0,1,2 o 3 (percentil 25, 50, 75, 90 respectivamente)")
+    # Ruta completa al log
+    log_file = os.path.join(log_dir, "fichero_{}.txt".format(fecha_actual))
 
+    # Configurar el nivel del logging
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
 
-    # Read arguments from the command line
-    args = parser.parse_args()
+    # Mensaje inicial en el log
+    logging.info("Iniciando el script con logs organizados por fecha.")
+    return log_file
 
-    path_log = args.path_log
-    date = args.date
-    percentil = args.percentil
+def guardar_json(resultados, execution_date):
+    # Crear directorio para resultados si no existe
+    resultado_dir = "./logs"
+    os.makedirs(resultado_dir, exist_ok=True)
+
+    # Guardar resultados en archivo JSON
+    json_file_path = os.path.join(resultado_dir, "fichero_resultados_{}.json".format(execution_date))
+    with open(json_file_path, "w") as json_file:
+        json.dump(resultados, json_file, indent=4)
+    logging.info("Resultados guardados en: {}".format(json_file_path))
+
+def calcular_mbtf(spark, path_log, date, percentil):
 
     date = datetime.strptime(date, "%Y%m")
 
     # Valores para filtrar la tabla
-    year = date.year
-    month = date.month
+    execution_year = date.year
+    execution_month = date.month
 
-    print("Calculamos el MBTF para la fecha {}".format(date))
+    execution_date = "{}{}".format(execution_year, execution_month)
+
+    resultados = {execution_date: {}}
+
+    logging.info("Calculamos el MBTF para el anho {} y mes {}".format(execution_year, execution_month))
 
     # Creamos un dataframe filtrando por la fecha de entrada y por los registros que no aportan nada
     df_logs = (spark.read.parquet(path_log)
-               .filter((col("year") == year) & (col("month") == month))
+               .filter((col("year") == execution_year) & (col("month") == execution_month))
                .filter(~(col("msg").like("%HANDLING MCE MEMORY ERROR%"))))
 
     expresiones = {
@@ -81,7 +99,8 @@ if __name__ == '__main__':
     min_timestamp_window = Window.orderBy("min_timestamp")
 
     for host in list_hosts:
-        print("Para el host {} tenemos lo siguiente:".format(host))
+        logging.info("Para el host {} tenemos lo siguiente:".format(host))
+
         time_diff_df = (df_logs
             .filter(col("host") == host)
             .orderBy("timestamp")
@@ -90,6 +109,12 @@ if __name__ == '__main__':
             .withColumn("time_diff_seconds", (unix_timestamp("timestamp") - unix_timestamp("prev_timestamp")))
             .withColumn("time_diff_minuts", round(col("time_diff_seconds") / lit(60), 2))
             .filter(col("time_diff_minuts").isNotNull()))
+
+        if time_diff_df.limit(10).count() <= 5:
+            logging.info("Son pocos logs para poder sacar alguna conclusion, pasamos al siguiente host.")
+            logging.info("----------------------------------------------------------------------------")
+            resultados[execution_date][host] = {"count_before": 0, "count_after": 0, "mbtf": 0}
+            continue
 
         time_diff_seconds_list = time_diff_df.select("time_diff_seconds").rdd.flatMap(lambda x: x).collect()
 
@@ -108,12 +133,23 @@ if __name__ == '__main__':
             .agg(min("timestamp").alias("min_timestamp"), count("err_code").alias("count"))
             .orderBy("group_id"))
 
-        print("El count total es {} y el count despues de agrupar es {}".format(df.count(), grouped_df.count()))
+        df_count = df.count()
+        grouped_df_count = grouped_df.count()
 
-        mtbf = (grouped_df
-            .withColumn("prev_timestamp", lag("min_timestamp").over(min_timestamp_window))
-            .withColumn("time_diff_seconds", (unix_timestamp("min_timestamp") - unix_timestamp("prev_timestamp")))
-            .filter(col("time_diff_seconds").isNotNull())
+        logging.info("El count del dataframe es {} y el count despues de agrupar los errores es {}".format(df_count, grouped_df_count))
+
+        grouped_mtbf_df = (grouped_df
+                           .withColumn("prev_timestamp", lag("min_timestamp").over(min_timestamp_window))
+                           .withColumn("time_diff_seconds", (unix_timestamp("min_timestamp") - unix_timestamp("prev_timestamp")))
+                           .filter(col("time_diff_seconds").isNotNull()))
+
+        if grouped_mtbf_df.limit(10).count() <= 2:
+            logging.info("Son pocos logs para poder sacar alguna conclusion del mtbf, pasamos al siguiente host.")
+            logging.info("----------------------------------------------------------------------------")
+            resultados[execution_date][host] = {"count_before": df_count, "count_after": grouped_df_count, "mbtf": 0}
+            continue
+
+        mtbf = (grouped_mtbf_df
             .agg(avg("time_diff_seconds").alias("MTBF_seconds"))
             .collect()[0]["MTBF_seconds"])
 
@@ -121,9 +157,50 @@ if __name__ == '__main__':
         mtbf_minutes = mtbf / 60  # En minutos
         mtbf_hours = mtbf / 3600  # En horas
 
-        print("MTBF en segundos: " + str(mtbf))
-        print("MTBF en minutos: " + str(mtbf_minutes))
-        print("MTBF en horas: " + str(mtbf_hours))
+        logging.info("MTBF en segundos: " + str(mtbf))
+        logging.info("MTBF en minutos: " + str(mtbf_minutes))
+        logging.info("MTBF en horas: " + str(mtbf_hours))
+        logging.info("----------------------------------------------------------------------------")
 
-    print("FIN: MTBF CALCULADOS")
+        # Guardar los resultados en el formato deseado
+        resultados[execution_date][host] = {
+            "count_before": df_count,
+            "count_after": grouped_df_count,
+            "mbtf": mtbf
+        }
+
+    return resultados
+
+def main():
+    # Configurar logs
+    setup_logging()
+
+    # Crear sesion de Spark
+    spark = SparkSession.builder.appName("Calculo de MTBF ").getOrCreate()
+
+    # Iniciamos el parser de los argumentos
+    parser = argparse.ArgumentParser(description="Script PySpark con argumentos de entrada.")
+    parser.add_argument("--path-log", required=True, help="configuration spark: path to read")
+    parser.add_argument("--date", required=True, help="configuration spark: date, format yyyyMM")
+    parser.add_argument("--percentil", type=int, required=True,
+                        help="configuration spark: Percentil: 0 (25%), 1 (50%), 2 (75%), 3 (90%)")
+
+    # Read arguments from the command line
+    args = parser.parse_args()
+
+    path_log = args.path_log
+    date = args.date
+    percentil = args.percentil
+
+    resultados = calcular_mbtf(spark, path_log, date, percentil)
+
+    # Guardar resultados en JSON
+    guardar_json(resultados, date)
+
+    logging.info("FIN: MTBF CALCULADOS")
     spark.stop()
+
+if __name__ == '__main__':
+    # Llamada a main
+    main()
+
