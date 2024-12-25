@@ -1,7 +1,9 @@
 # TFM-MauricioGarces
 
-Este proyecto contiene un script PySpark que se puede ejecutar usando `spark-submit`. El script requiere tres argumentos para funcionar correctamente.
-Hay que dejar claro que este proyecto solo funciona sobre el cluster Finisterrae II del CESGA.
+Este proyecto contiene dos scripts PySpark que se pueden ejecutar usando `spark-submit`. 
+
+- El script [recoleccion_errores.py](recoleccion_errores.py) requiere tres argumentos para funcionar correctamente. Hay que dejar claro que este script solo funciona sobre el cluster Finisterrae II del CESGA.
+- El script [calcular_mtbf.py](calcular_mtbf.py) requiere dos argumentos para funcionar correctamente y además funciona sobre el cluster Finisterrae III del CESGA.
 
 ## Requisitos Previos
 
@@ -14,7 +16,7 @@ Hay que dejar claro que este proyecto solo funciona sobre el cluster Finisterrae
 1. Clona el repositorio a tu máquina local:
     ```bash
     git clone https://github.com/MauricioGarcesSandoval/TFM-MauricioGarces.git
-    cd nombre-del-repositorio
+    cd TFM-MauricioGarces
     ```
 
 2. Instala las dependencias necesarias:
@@ -22,9 +24,11 @@ Hay que dejar claro que este proyecto solo funciona sobre el cluster Finisterrae
     pip install -r requirements.txt
     ```
 
-## Ejecución del Script
+## Ejecución de los scripts:
 
-El script principal se encuentra en el archivo `recoleccion_errores.py`. Este script requiere tres argumentos de entrada:
+### recoleccion_errores.py
+
+El script se encuentra en el archivo `recoleccion_errores.py`. Este script requiere tres argumentos de entrada:
 
 1. `--date-from`: Fecha desde la que queremos los logs.
 2. `--date-to`: Fecha hasta la que queremos los logs.
@@ -43,24 +47,32 @@ spark-submit --master yarn --deploy-mode client --num-executors 3 --executor-cor
 - `--date-to`: Fecha fin con format yyyyMMdd: 20220901.
 - `--host`: Host del cluster: host1.
 
+### calcular_mtbf.py
+
+El script se encuentra en el archivo `calcular_mtbf.py`. Este script requiere dos argumentos de entrada:
+
+1. `--path-log`: Ruta en HDFS donde están los logs.
+2. `--date`: Fecha para calcular el mtbf.
+
+### Ejemplo de uso:
+
+Puedes ejecutar el script usando el siguiente comando `spark-submit`:
+
+```bash
+spark-submit --master yarn --deploy-mode client --num-executors 3 --executor-cores 5 --executor-memory 30G --conf spark.yarn.submit.waitAppCompletion=false --name 'MTBF calculation' calcular_mtbf.py --path-log "/user/tec_sis4/memory-errors" --date 202208
+```
+
+
 ## Estructura del Proyecto
 
 ```plaintext
 TFM-MauricioGarces/
 │
 ├── recoleccion_errores.py
+├── calcular_mtbf.py
 ├── requirements.txt
 └── README.md
 ```
-
-## Notas
-
-- Asegúrate de tener suficiente memoria y recursos asignados a Spark si estás trabajando con grandes conjuntos de datos.
-- Puedes ajustar la configuración de Spark utilizando opciones adicionales en el comando `spark-submit`, como `--master`, `--executor-memory`, etc.
-
-## Licencia
-
-Este proyecto está bajo la licencia [Nombre de la Licencia]. Ver el archivo `LICENSE` para más detalles.
 
 ## Contacto
 
