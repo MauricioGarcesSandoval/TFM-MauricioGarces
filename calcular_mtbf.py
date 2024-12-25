@@ -8,6 +8,7 @@ import logging
 import os
 import json
 
+
 def setup_logging():
     # Obtener la fecha actual en formato yyyyMMdd para guardar el log
     fecha_actual = datetime.now().strftime("%Y%m%d")
@@ -30,6 +31,7 @@ def setup_logging():
     logging.info("Iniciando el script con logs organizados por fecha.")
     return log_file
 
+
 def guardar_json(resultados, execution_date):
     # Crear directorio para resultados si no existe
     resultado_dir = "./logs"
@@ -41,8 +43,8 @@ def guardar_json(resultados, execution_date):
         json.dump(resultados, json_file, indent=4)
     logging.info("Resultados guardados en: {}".format(json_file_path))
 
-def calcular_mbtf(spark, path_log, date, percentil):
 
+def calcular_mbtf(spark, path_log, date):
     date = datetime.strptime(date, "%Y%m")
 
     # Valores para filtrar la tabla
@@ -100,20 +102,22 @@ def calcular_mbtf(spark, path_log, date, percentil):
 
     for host in list_hosts:
         logging.info("Para el host {} tenemos lo siguiente:".format(host))
+        resultados[execution_date][host] = {}
 
         time_diff_df = (df_logs
-            .filter(col("host") == host)
-            .orderBy("timestamp")
-            .withColumn("prev_timestamp", lag("timestamp").over(cpu_window))
-            .withColumn("row_number", row_number().over(cpu_window))
-            .withColumn("time_diff_seconds", (unix_timestamp("timestamp") - unix_timestamp("prev_timestamp")))
-            .withColumn("time_diff_minuts", round(col("time_diff_seconds") / lit(60), 2))
-            .filter(col("time_diff_minuts").isNotNull()))
+                        .filter(col("host") == host)
+                        .orderBy("timestamp")
+                        .withColumn("prev_timestamp", lag("timestamp").over(cpu_window))
+                        .withColumn("row_number", row_number().over(cpu_window))
+                        .withColumn("time_diff_seconds",
+                                    (unix_timestamp("timestamp") - unix_timestamp("prev_timestamp")))
+                        .withColumn("time_diff_minuts", round(col("time_diff_seconds") / lit(60), 2))
+                        .filter(col("time_diff_minuts").isNotNull()))
 
         if time_diff_df.limit(10).count() <= 5:
             logging.info("Son pocos logs para poder sacar alguna conclusion, pasamos al siguiente host.")
             logging.info("----------------------------------------------------------------------------")
-            resultados[execution_date][host] = {"count_before": 0, "count_after": 0, "mbtf": 0}
+            resultados[execution_date][host]["nopercetil"] = {"count_before": 0, "count_after": 0, "mbtf": 0}
             continue
 
         time_diff_seconds_list = time_diff_df.select("time_diff_seconds").rdd.flatMap(lambda x: x).collect()
@@ -121,78 +125,83 @@ def calcular_mbtf(spark, path_log, date, percentil):
         # Calcular percentiles
         percentiles = np.percentile(time_diff_seconds_list, [25, 50, 75, 90])
 
-        # Crear una columna que indique si el error esta dentro del rango de 60 segundos respecto al error anterior
-        # Crear la columna de grupo acumulando la columna is_new_group
-        df = (time_diff_df
-              .withColumn("is_new_group",
-                          when(col("time_diff_seconds") >= percentiles[percentil], 1).otherwise(0))
-              .withColumn("group_id", sum("is_new_group").over(timestamp_window)))
+        for idx, percentil_value in enumerate(percentiles):
+            logging.info("Calculando para el percentil {} ({})".format(idx, percentil_value))
+            percentil_resultado = "percentil_{}".format(idx)
+            resultados[execution_date][host][percentil_resultado] = {}
 
-        grouped_df = (df
-            .groupBy("group_id")
-            .agg(min("timestamp").alias("min_timestamp"), count("err_code").alias("count"))
-            .orderBy("group_id"))
+            # Crear una columna que indique si el error esta dentro del rango de segundos (segun el percentil)
+            # respecto al error anterior.
+            # Crear la columna de grupo acumulando la columna is_new_group
+            df = (time_diff_df
+                  .withColumn("is_new_group",
+                              when(col("time_diff_seconds") >= percentil_value, 1).otherwise(0))
+                  .withColumn("group_id", sum("is_new_group").over(timestamp_window)))
 
-        df_count = df.count()
-        grouped_df_count = grouped_df.count()
+            grouped_df = (df
+                          .groupBy("group_id")
+                          .agg(min("timestamp").alias("min_timestamp"), count("err_code").alias("count"))
+                          .orderBy("group_id"))
 
-        logging.info("El count del dataframe es {} y el count despues de agrupar los errores es {}".format(df_count, grouped_df_count))
+            df_count = df.count()
+            grouped_df_count = grouped_df.count()
 
-        grouped_mtbf_df = (grouped_df
-                           .withColumn("prev_timestamp", lag("min_timestamp").over(min_timestamp_window))
-                           .withColumn("time_diff_seconds", (unix_timestamp("min_timestamp") - unix_timestamp("prev_timestamp")))
-                           .filter(col("time_diff_seconds").isNotNull()))
+            logging.info("El count del dataframe es {} y el count despues de agrupar los errores es {}".format(df_count,
+                                                                                                               grouped_df_count))
 
-        if grouped_mtbf_df.limit(10).count() <= 2:
-            logging.info("Son pocos logs para poder sacar alguna conclusion del mtbf, pasamos al siguiente host.")
-            logging.info("----------------------------------------------------------------------------")
-            resultados[execution_date][host] = {"count_before": df_count, "count_after": grouped_df_count, "mbtf": 0}
-            continue
+            grouped_mtbf_df = (grouped_df
+                               .withColumn("prev_timestamp", lag("min_timestamp").over(min_timestamp_window))
+                               .withColumn("time_diff_seconds",
+                                           (unix_timestamp("min_timestamp") - unix_timestamp("prev_timestamp")))
+                               .filter(col("time_diff_seconds").isNotNull()))
 
-        mtbf = (grouped_mtbf_df
+            if grouped_mtbf_df.limit(10).count() <= 2:
+                logging.info("Son pocos logs para poder sacar alguna conclusion del mtbf, pasamos al siguiente host.")
+                logging.info("----------------------------------------------------------------------------")
+                resultados[execution_date][host][percentil_resultado] = {"count_before": df_count,
+                                                                         "count_after": grouped_df_count, "mbtf": None}
+                continue
+
+            mtbf = (grouped_mtbf_df
             .agg(avg("time_diff_seconds").alias("MTBF_seconds"))
             .collect()[0]["MTBF_seconds"])
 
-        # Convertir el MTBF a minutos, horas
-        mtbf_minutes = mtbf / 60  # En minutos
-        mtbf_hours = mtbf / 3600  # En horas
+            # Convertir el MTBF a minutos y horas
+            mtbf_minutes = mtbf / 60  # En minutos
+            mtbf_hours = mtbf / 3600  # En horas
 
-        logging.info("MTBF en segundos: " + str(mtbf))
-        logging.info("MTBF en minutos: " + str(mtbf_minutes))
-        logging.info("MTBF en horas: " + str(mtbf_hours))
-        logging.info("----------------------------------------------------------------------------")
+            logging.info("MTBF en segundos: " + str(mtbf))
+            logging.info("MTBF en minutos: " + str(mtbf_minutes))
+            logging.info("MTBF en horas: " + str(mtbf_hours))
+            logging.info("----------------------------------------------------------------------------")
 
-        # Guardar los resultados en el formato deseado
-        resultados[execution_date][host] = {
-            "count_before": df_count,
-            "count_after": grouped_df_count,
-            "mbtf": mtbf
-        }
+            # Guardar los resultados en el formato para JSON
+            resultados[execution_date][host][percentil_resultado] = {
+                "count_before": df_count,
+                "count_after": grouped_df_count,
+                "mbtf": mtbf
+            }
 
     return resultados
+
 
 def main():
     # Configurar logs
     setup_logging()
 
-    # Crear sesion de Spark
-    spark = SparkSession.builder.appName("Calculo de MTBF ").getOrCreate()
-
     # Iniciamos el parser de los argumentos
     parser = argparse.ArgumentParser(description="Script PySpark con argumentos de entrada.")
     parser.add_argument("--path-log", required=True, help="configuration spark: path to read")
     parser.add_argument("--date", required=True, help="configuration spark: date, format yyyyMM")
-    parser.add_argument("--percentil", type=int, required=True,
-                        help="configuration spark: Percentil: 0 (25%), 1 (50%), 2 (75%), 3 (90%)")
-
-    # Read arguments from the command line
     args = parser.parse_args()
 
     path_log = args.path_log
     date = args.date
-    percentil = args.percentil
 
-    resultados = calcular_mbtf(spark, path_log, date, percentil)
+    # Creacion sesion de Spark
+    spark = SparkSession.builder.appName("CALCULO_MBTF_{}".format(date)).getOrCreate()
+
+    resultados = calcular_mbtf(spark, path_log, date)
 
     # Guardar resultados en JSON
     guardar_json(resultados, date)
@@ -200,7 +209,7 @@ def main():
     logging.info("FIN: MTBF CALCULADOS")
     spark.stop()
 
+
 if __name__ == '__main__':
     # Llamada a main
     main()
-
