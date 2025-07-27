@@ -59,7 +59,7 @@ El script se encuentra en el archivo `calcular_mtbf.py`. Este script requiere do
 Puedes ejecutar el script usando el siguiente comando `spark-submit`:
 
 ```bash
-spark-submit --master yarn --deploy-mode client --num-executors 3 --executor-cores 5 --executor-memory 30G --conf spark.yarn.submit.waitAppCompletion=false --name 'MTBF calculation' calcular_mtbf.py --path-log "/user/tec_sis4/memory-errors" --date 202208
+spark-submit --master yarn --deploy-mode client --num-executors 3 --executor-cores 5 --executor-memory 30G --conf spark.yarn.submit.waitAppCompletion=false --name 'MTBF calculation' calcular_mtbf.py --path-log "/user/tec_sis4/memory-errors" --date 202208 --output-path "/user/tec_sis6/logs_json"
 ```
 
 
