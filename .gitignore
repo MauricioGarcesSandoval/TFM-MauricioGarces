@@ -1,0 +1,23 @@
+# ===============================
+# ARCHIVOS DE PYTHON
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+.ipynb_checkpoints/
+
+# Archivos de IDEs
+.vscode/
+.idea/
+*.iml
+
+# ===============================
+# JUPYTER / NOTEBOOKS
+# ===============================
+*.ipynb_checkpoints
