@@ -52,8 +52,7 @@ if __name__ == '__main__':
 
         df_union = df_union.unionAll(df_actual)
         print("Se lee para la fecha {0}".format(fecha_inicio))
-
-    fecha_inicio += timedelta(days=1)
+        fecha_inicio += timedelta(days=1)
 
     print("#########################################################################")
     print("#####################        PRIMER DATAFRAME          ##################")
