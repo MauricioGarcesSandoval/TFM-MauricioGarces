@@ -141,7 +141,7 @@ print("ROC AUC:", roc_auc)
 print("PR AUC:", pr_auc)
 
 # ============================================================
-# 9. MULTI-THRESHOLD ANALYSIS (importante)
+# 9. MULTI-THRESHOLD ANALYSIS
 # ============================================================
 
 print("\nThreshold analysis:")
@@ -209,4 +209,4 @@ import joblib
 
 joblib.dump(model, "lr_model_3h.json")
 
-print("\nDONE ✅")
+print("\nDONE")

@@ -150,7 +150,7 @@ print("ROC AUC:", roc_auc)
 print("PR AUC:", pr_auc)
 
 # ============================================================
-# 9. MULTI-THRESHOLD ANALYSIS (importante)
+# 9. MULTI-THRESHOLD ANALYSIS
 # ============================================================
 
 print("\nThreshold analysis:")
@@ -254,6 +254,6 @@ print(importance.sort_values(ascending=False).head(10))
 # 13. SAVE MODEL
 # ============================================================
 
-model.save_model("xgboost_model.json")
+model.save_model("xgboost_model_1h.json")
 
-print("\nDONE ✅")
+print("\nDONE")
