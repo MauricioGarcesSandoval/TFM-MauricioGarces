@@ -236,5 +236,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # Llamada a main
     main()

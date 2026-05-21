@@ -1,10 +1,13 @@
 # TFM-MauricioGarces
 
-Este proyecto contiene dos scripts PySpark que se pueden ejecutar usando `spark-submit` y otro que es un fichero sh para calcular el mtbf y guardarlo en ficheros JSON. 
+Este proyecto contiene varios procesos, de ETL y de ML. Los primeros son para realizar procesamiento de datos y los segundos para ejecutar procesos de Machine Learning.
 
-- El script [recoleccion_errores.py](recoleccion_errores.py) requiere tres argumentos para funcionar correctamente. Hay que dejar claro que este script solo funciona sobre el cluster Finisterrae II del CESGA.
-- El script [calcular_mtbf.py](calcular_mtbf.py) requiere dos argumentos para funcionar correctamente y además funciona sobre el cluster Finisterrae III del CESGA.
-- El script [run_mtbf.sh](run_mtbf.sh) requiere primero activar un entorno conda correcto y necesita dos argumentos.
+Este proyecto contiene varios scripts PySpark que se pueden ejecutar usando `spark-submit` y otro que son ficheros sh para calcular el mtbf y guardarlo en ficheros JSON, por ejemplo:
+
+- El script [recoleccion_errores.py](etl/recoleccion_errores.py) requiere tres argumentos para funcionar correctamente. Hay que dejar claro que este script solo funciona sobre el cluster Finisterrae II del CESGA.
+- El script [calcular_mtbf.py](etl/calcular_mtbf.py) requiere dos argumentos para funcionar correctamente y además funciona sobre el cluster Finisterrae III del CESGA.
+- El script [run_mtbf.sh](etl/runners/run_mtbf.sh) requiere primero activar un entorno conda correcto y necesita dos argumentos.
+- El script [train_lr_1_hour.py](ml/lr/train_lr_1_hour.py) se ejecuta con Python con dos parámetros.
 
 
 ## Requisitos Previos
@@ -80,6 +83,21 @@ module load anaconda3/2020.02
 sh run_mtbf.sh 202112 /user/tec_sis6/memory-errors
 ```
 
+### train_lr_1_hour.py
+
+El script se encuentra en el archivo `train_lr_1_hour.py`. Este script requiere dos argumentos de entrada:
+
+1. Ruta local de los datos.
+2. Sample para reducir los datos.
+
+### Ejemplo de uso:
+
+Puedes ejecutar el script usando el siguiente comando `python`:
+
+```bash
+module load anaconda3/2020.02
+python train_lr_5_minutes.py --input "data/data_output/features_ml/minutes=5" --sample-frac 0.05
+```
 
 
 ## Estructura del Proyecto
@@ -87,10 +105,36 @@ sh run_mtbf.sh 202112 /user/tec_sis6/memory-errors
 ```plaintext
 TFM-MauricioGarces/
 │
-├── recoleccion_errores.py
-├── calcular_mtbf.py
-├── requirements.txt
-├── run_mtbf.sh
+├── etl
+├──── notebooks
+├────── analisis_fallos.ipynb
+├────── graficas_mtbf.ipynb
+├──── runners
+├────── etl_month.sh
+├────── run_mtbf.sh
+├────── run_recoleccion_logs.sh
+├──── calcular_mtbf.py
+├──── etl.py
+├──── recoleccion_errores.py
+├──── recoleccion_logs.py
+├── ml
+├──── lr
+├────── graficas
+├────── train_lr_1_hour.py
+├────── train_lr_3_hour.py
+├────── train_lr_5_minutes.py
+├────── train_lr_30_minutes.py
+├──── xgb
+├────── graficas
+├────── modelos
+├──────── xgboost_model_1h.json
+├──────── xgboost_model_3h.json
+├──────── xgboost_model_5m.json
+├──────── xgboost_model_30m.json
+├────── train_xgb_1_hour.py
+├────── train_xgb_3_hour.py
+├────── train_xgb_5_minutes.py
+├────── train_xgb_30_minutes.py
 └── README.md
 ```
 
