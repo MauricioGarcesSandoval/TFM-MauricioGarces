@@ -54,19 +54,6 @@ for c in ["target_window_start", "label_feature_window"]:
         df = df.drop(columns=[c])
 
 # ============================================================
-# 3. SAMPLING
-# ============================================================
-
-print("Sampling...")
-
-pos_df = df[df["label_next_hour"] == 1]
-neg_df = df[df["label_next_hour"] == 0].sample(frac=SAMPLE_FRAC, random_state=42)
-
-df = pd.concat([pos_df, neg_df])
-
-print("After sampling:", len(df))
-
-# ============================================================
 # 4. FEATURE ENGINEERING
 # ============================================================
 
@@ -86,35 +73,56 @@ if "host" in df.columns:
     df = df.drop(columns=["host"])
 
 # ============================================================
-# 5. SPLIT TEMPORAL
+# 5. TEMPORAL SPLIT
 # ============================================================
+
+print("Temporal split...")
 
 df = df.sort_values("feature_window_start")
 
 split_index = int(len(df) * 0.8)
 
-train = df.iloc[:split_index]
-test = df.iloc[split_index:]
+train = df.iloc[:split_index].copy()
+test = df.iloc[split_index:].copy()
 
-X_train = train.drop(columns=["label_next_hour", "feature_window_start", "month", "year"])
+print(f"Train before sampling: {len(train)}")
+print(f"Test: {len(test)}")
+
+print("Positivos train:", train["label_next_hour"].mean())
+print("Positivos test :", test["label_next_hour"].mean())
+
+# ============================================================
+# 5.1 SUBSAMPLING ONLY TRAIN
+# ============================================================
+
+print("Sampling only training negatives...")
+
+train_pos = train[train["label_next_hour"] == 1]
+train_neg = train[train["label_next_hour"] == 0].sample(
+    frac=SAMPLE_FRAC,
+    random_state=42
+)
+
+train = pd.concat([train_pos, train_neg])
+
+train = train.sample(frac=1, random_state=42).reset_index(drop=True)
+
+print(f"Train after sampling: {len(train)}")
+print(f"Positive train: {train['label_next_hour'].sum()}")
+print(f"Negative train: {(train['label_next_hour'] == 0).sum()}")
+
+print(f"Positive test: {test['label_next_hour'].sum()}")
+print(f"Negative test: {(test['label_next_hour'] == 0).sum()}")
+
+X_train = train.drop(
+    columns=["label_next_hour", "feature_window_start", "month", "year"]
+)
 y_train = train["label_next_hour"]
 
-X_test = test.drop(columns=["label_next_hour", "feature_window_start", "month", "year"])
+X_test = test.drop(
+    columns=["label_next_hour", "feature_window_start", "month", "year"]
+)
 y_test = test["label_next_hour"]
-
-# ============================================================
-# 6. BALANCE
-# ============================================================
-
-pos = y_train.sum()
-neg = len(y_train) - pos
-
-scale_pos_weight = float(neg) / float(pos)
-
-print("\nClass stats:")
-print("Positives:", int(pos))
-print("Negatives:", int(neg))
-print("scale_pos_weight:", scale_pos_weight)
 
 # ============================================================
 # 7. TRAIN
@@ -128,9 +136,10 @@ model = xgb.XGBClassifier(
     learning_rate=0.1,
     subsample=0.8,
     colsample_bytree=0.8,
-    scale_pos_weight=scale_pos_weight,
+    # scale_pos_weight=scale_pos_weight,
     eval_metric="logloss",
-    n_jobs=-1
+    n_jobs=-1,
+    random_state=42
 )
 
 model.fit(X_train, y_train)
@@ -181,7 +190,7 @@ plt.plot([0, 1], [0, 1], linestyle="--", label="Random")
 plt.xlabel("FPR")
 plt.ylabel("TPR")
 plt.title("ROC Curve")
-plt.legend()
+plt.legend(loc="lower right")
 plt.grid()
 plt.savefig("graficas/minutes=30/roc_curve.png")
 plt.close()
@@ -190,7 +199,7 @@ plt.close()
 # 12. PRECISION-RECALL CURVE
 # ============================================================
 
-precision, recall, thresholds = precision_recall_curve(y_test, y_pred_prob)
+precision, recall, _ = precision_recall_curve(y_test, y_pred_prob)
 
 plt.figure()
 plt.plot(recall, precision)
@@ -205,11 +214,16 @@ plt.close()
 # 13. THRESHOLD CURVE
 # ============================================================
 
+# Usamos un número fijo de umbrales para evitar recorrer
+# cientos de miles de thresholds generados por sklearn.
+
+thresholds = np.linspace(0.0, 1.0, 101)
+
 precisions_vals = []
 recalls_vals = []
 
 for t in thresholds:
-    y_pred = (y_pred_prob > t).astype(int)
+    y_pred = (y_pred_prob >= t).astype(int)
 
     tp = ((y_pred == 1) & (y_test == 1)).sum()
     fp = ((y_pred == 1) & (y_test == 0)).sum()
@@ -227,7 +241,7 @@ plt.plot(thresholds, recalls_vals, label="Recall")
 plt.xlabel("Threshold")
 plt.ylabel("Score")
 plt.title("Precision / Recall vs Threshold")
-plt.legend()
+plt.legend(loc="best")
 plt.grid()
 plt.savefig("graficas/minutes=30/threshold_curve.png")
 plt.close()
@@ -239,7 +253,7 @@ plt.close()
 importance = pd.Series(model.feature_importances_, index=X_train.columns)
 importance = importance.sort_values(ascending=True)
 
-plt.figure(figsize=(8,6))
+plt.figure(figsize=(8, 6))
 importance.plot(kind="barh")
 plt.title("Feature Importance")
 plt.xlabel("Importance")
@@ -251,9 +265,8 @@ print("\nTop features:")
 print(importance.sort_values(ascending=False).head(10))
 
 # ============================================================
-# 13. SAVE MODEL
+# 15. SAVE MODEL
 # ============================================================
-
 model.save_model("modelos/xgboost_model_30m.json")
 
-print("\nDONE ")
+print("\nDONE")
