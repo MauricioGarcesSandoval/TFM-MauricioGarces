@@ -56,19 +56,6 @@ for c in ["target_window_start", "label_feature_window"]:
         df = df.drop(columns=[c])
 
 # ============================================================
-# 3. SAMPLING
-# ============================================================
-
-print("Sampling...")
-
-pos_df = df[df["label_next_hour"] == 1]
-neg_df = df[df["label_next_hour"] == 0].sample(frac=SAMPLE_FRAC, random_state=42)
-
-df = pd.concat([pos_df, neg_df])
-
-print("After sampling:", len(df))
-
-# ============================================================
 # 4. FEATURE ENGINEERING
 # ============================================================
 
@@ -88,15 +75,47 @@ if "host" in df.columns:
     df = df.drop(columns=["host"])
 
 # ============================================================
-# 5. SPLIT TEMPORAL
+# 5. TEMPORAL SPLIT
 # ============================================================
+
+print("Temporal split...")
 
 df = df.sort_values("feature_window_start")
 
 split_index = int(len(df) * 0.8)
 
-train = df.iloc[:split_index]
-test = df.iloc[split_index:]
+train = df.iloc[:split_index].copy()
+test = df.iloc[split_index:].copy()
+
+print(f"Train before sampling: {len(train)}")
+print(f"Test: {len(test)}")
+
+# Distribución REAL de las clases
+print("Positivos train:", train["label_next_hour"].mean())
+print("Positivos test :", test["label_next_hour"].mean())
+
+# ============================================================
+# 5.1 SUBSAMPLING ONLY TRAIN
+# ============================================================
+
+print("Sampling only training negatives...")
+
+train_pos = train[train["label_next_hour"] == 1]
+train_neg = train[train["label_next_hour"] == 0].sample(
+    frac=SAMPLE_FRAC,
+    random_state=42
+)
+
+train = pd.concat([train_pos, train_neg])
+
+train = train.sample(frac=1, random_state=42).reset_index(drop=True)
+
+print(f"Train after sampling: {len(train)}")
+print(f"Positive train: {train['label_next_hour'].sum()}")
+print(f"Negative train: {(train['label_next_hour']==0).sum()}")
+
+print(f"Positive test: {test['label_next_hour'].sum()}")
+print(f"Negative test: {(test['label_next_hour']==0).sum()}")
 
 X_train = train.drop(columns=["label_next_hour", "feature_window_start", "month", "year"])
 y_train = train["label_next_hour"]
@@ -119,7 +138,6 @@ X_test_scaled = scaler.fit_transform(X_test)
 print("\nTraining logistic regression")
 
 model = LogisticRegression(
-    class_weight="balanced",
     max_iter=1000,
     n_jobs=-1
 )
@@ -206,7 +224,6 @@ print(coefficients.head(10))
 # 13. SAVE MODEL
 # ============================================================
 import joblib
-
-joblib.dump(model, "lr_model_30m.json")
+joblib.dump(model, "modelos/lr_model_30m.json")
 
 print("\nDONE")
